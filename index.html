@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>目分量 - 毎日3問の感覚テスト</title>
+<style>
+:root{--bg:#fbf7ef;--ink:#2b2621;--sub:#8a8075;--accent:#e2572b;--ok:#2f9e6b;--line:#e4dccd}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+#app{max-width:460px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;padding:18px 18px 28px}
+header{display:flex;justify-content:space-between;align-items:baseline}
+h1{font-size:26px;margin:0;letter-spacing:.08em}
+.date{color:var(--sub);font-size:13px}
+.steps{display:flex;gap:6px;margin:12px 0 4px}
+.steps span{flex:1;height:6px;border-radius:3px;background:var(--line)}
+.steps span.on{background:var(--accent)}.steps span.done{background:var(--ink)}
+main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center}
+.q{font-size:20px;font-weight:700}.hint{color:var(--sub);font-size:14px}
+.big{font-size:64px;font-weight:800;line-height:1}
+button{font:inherit;border:0;border-radius:14px;padding:14px 22px;font-size:18px;font-weight:700;background:var(--ink);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:2px solid var(--ink)}
+button:disabled{opacity:.35}
+.stage{width:100%;aspect-ratio:1/1;background:#fff;border-radius:18px;box-shadow:0 2px 10px rgba(0,0,0,.06);position:relative;touch-action:none;overflow:hidden}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
+.keypad button{background:#fff;color:var(--ink);border:2px solid var(--line);padding:12px 0}
+.keypad button.ok{background:var(--accent);color:#fff;border-color:var(--accent)}
+.answer{font-size:40px;font-weight:800;min-height:48px;letter-spacing:.05em}
+.res{font-size:15px;color:var(--sub)}
+.score{font-size:22px;font-weight:800}
+.share{white-space:pre-wrap;word-break:break-all;width:100%;background:#fff;border-radius:12px;padding:12px 16px;font-size:15px;line-height:1.6;text-align:left}
+.rows{width:100%;font-size:15px}.rows div{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:7px 2px}
+.toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .3s}
+.toast.show{opacity:1}
+</style></head>
+<body><div id="app">
+<header><h1>目分量</h1><div class="date" id="date"></div></header>
+<div class="steps" id="steps"><span></span><span></span><span></span></div>
+<main id="main"></main>
+</div><div class="toast" id="toast"></div>
+<script>
+// ---- 日付から同じ問題を作る（同じ日なら誰でも同じ） ----
+const today = new Date(); const ymd = today.getFullYear()*10000 + (today.getMonth()+1)*100 + today.getDate();
+const params = new URLSearchParams(location.search);
+const PRACTICE = params.has("practice");
+let seed = PRACTICE ? Math.floor(Math.random()*1e9) : ymd;
+function rng(){ seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+const R = (a,b) => a + Math.floor(rng()*(b-a+1));
+const Q = {
+  count: { n: R(28, 72), dots: [] },
+  angle: { deg: R(20, 340) },
+  split: { pct: R(8, 92), fromLeft: rng() < .5 }
+};
+for (let i=0;i<Q.count.n;i++){ let x,y,ok,tries=0; do{ x=.06+rng()*.88; y=.06+rng()*.88; ok=Q.count.dots.every(d=>Math.hypot(d[0]-x,d[1]-y)>.045); }while(!ok && ++tries<60); Q.count.dots.push([x,y]); }
+document.getElementById("date").textContent = PRACTICE ? "練習モード" : `${today.getMonth()+1}月${today.getDate()}日の問題`;
+const main = document.getElementById("main"); const steps = [...document.querySelectorAll("#steps span")];
+const scores = {};
+function setStep(i){ steps.forEach((s,k)=>s.className = k<i ? "done" : k===i ? "on" : ""); }
+function toast(t){ const e=document.getElementById("toast"); e.textContent=t; e.classList.add("show"); setTimeout(()=>e.classList.remove("show"),1600); }
+function html(s){ main.innerHTML = s; }
+function canvasIn(stage){ const c=document.createElement("canvas"); const r=stage.getBoundingClientRect(); const dpr=devicePixelRatio||1; c.width=r.width*dpr; c.height=r.height*dpr; c.style.width="100%"; c.style.height="100%"; stage.appendChild(c); const g=c.getContext("2d"); g.scale(dpr,dpr); return {c,g,w:r.width,h:r.height}; }
+
+// ---- 表紙 ----
+function intro(){
+  setStep(-1);
+  html(`<div class="big">👁</div><div class="q">毎日3問の、目分量テスト</div>
+  <div class="hint">かず・かくど・わりあい<br>道具は使わず、感覚だけで答えてください</div>
+  <button id="go">はじめる</button>`);
+  document.getElementById("go").onclick = countGame;
+}
+
+// ---- 1. かず：一瞬だけ出る点の数 ----
+function countGame(){
+  setStep(0);
+  html(`<div class="q">1. かず</div><div class="hint">点が2秒だけ出ます。いくつありましたか？</div>
+  <div class="stage" id="st"></div><button id="show">表示する</button>`);
+  document.getElementById("show").onclick = () => {
+    document.getElementById("show").remove();
+    const {g,w,h} = canvasIn(document.getElementById("st"));
+    g.fillStyle = "#2b2621"; Q.count.dots.forEach(([x,y]) => { g.beginPath(); g.arc(x*w, y*h, Math.max(3.5, w*.012), 0, 7); g.fill(); });
+    setTimeout(() => { g.clearRect(0,0,w,h); countInput(); }, 2000);
+  };
+}
+function countInput(){
+  let v = "";
+  html(`<div class="q">1. かず</div><div class="hint">いくつありましたか？</div><div class="answer" id="ans">&nbsp;</div>
+  <div class="keypad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-k="${n}">${n}</button>`).join("")}<button data-k="del">消す</button><button data-k="0">0</button><button data-k="ok" class="ok">決定</button></div>`);
+  main.querySelectorAll(".keypad button").forEach(b => b.onclick = () => {
+    const k = b.dataset.k;
+    if (k === "del") v = v.slice(0,-1);
+    else if (k === "ok") { if (!v) return; return countResult(+v); }
+    else if (v.length < 3) v += k;
+    document.getElementById("ans").textContent = v || " ";
+  });
+}
+function countResult(guess){
+  const n = Q.count.n, err = Math.abs(guess - n) / n;
+  const s = Math.max(0, Math.round(100 - err * 250)); scores.count = {s, line:`${guess}（正解 ${n}）`};
+  html(`<div class="q">1. かず</div><div class="res">あなた</div><div class="big">${guess}</div><div class="res">正解は <b>${n}</b> 個</div>
+  <div class="score">${s} 点</div><button id="nx">次へ</button>`);
+  document.getElementById("nx").onclick = angleGame;
+}
+
+// ---- 2. かくど：指定の角度に線を合わせる ----
+function angleGame(){
+  setStep(1);
+  const target = Q.angle.deg;
+  html(`<div class="q">2. かくど</div><div class="hint">右向きの線から、反時計回りに <b style="font-size:22px;color:var(--accent)">${target}°</b><br>線を指でなぞって回し、決定</div>
+  <div class="stage" id="st"></div><button id="ok">決定</button>`);
+  const st = document.getElementById("st"); const {g,w,h} = canvasIn(st);
+  const cx = w/2, cy = h/2, rad = w*.38; let a = 0; // 反時計回りの角度（度）
+  function draw(){
+    g.clearRect(0,0,w,h);
+    g.strokeStyle = "#e4dccd"; g.lineWidth = 2; g.beginPath(); g.arc(cx,cy,rad,0,7); g.stroke();
+    g.strokeStyle = "#8a8075"; g.lineWidth = 3; g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx+rad,cy); g.stroke();
+    const r = -a*Math.PI/180; g.strokeStyle = "#e2572b"; g.lineWidth = 5; g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx+rad*Math.cos(r), cy+rad*Math.sin(r)); g.stroke();
+    g.fillStyle = "#e2572b"; g.beginPath(); g.arc(cx+rad*Math.cos(r), cy+rad*Math.sin(r), 12, 0, 7); g.fill();
+    g.fillStyle = "#2b2621"; g.beginPath(); g.arc(cx,cy,5,0,7); g.fill();
+  }
+  function setFrom(e){ const b = st.getBoundingClientRect(); const x = e.clientX-b.left-cx, y = e.clientY-b.top-cy; a = (Math.atan2(-y, x)*180/Math.PI + 360) % 360; draw(); }
+  st.onpointerdown = e => { st.setPointerCapture(e.pointerId); setFrom(e); }; st.onpointermove = e => { if (e.buttons || e.pressure) setFrom(e); };
+  draw();
+  document.getElementById("ok").onclick = () => {
+    let d = Math.abs(a - target) % 360; if (d > 180) d = 360 - d;
+    const s = Math.max(0, Math.round(100 - d * 2)); scores.angle = {s, line:`${Math.round(a)}°（正解 ${target}°）`};
+    const r1 = -target*Math.PI/180; g.strokeStyle = "#2f9e6b"; g.lineWidth = 4; g.setLineDash([8,6]); g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx+rad*Math.cos(r1), cy+rad*Math.sin(r1)); g.stroke(); g.setLineDash([]);
+    st.onpointerdown = st.onpointermove = null;
+    document.getElementById("ok").remove();
+    main.insertAdjacentHTML("beforeend", `<div class="res">あなた ${Math.round(a)}° ／ 正解 ${target}°（緑の点線）　ずれ ${Math.round(d)}°</div><div class="score">${s} 点</div><button id="nx">次へ</button>`);
+    document.getElementById("nx").onclick = splitGame;
+  };
+}
+
+// ---- 3. わりあい：線の何%かを当てる ----
+function splitGame(){
+  setStep(2);
+  const {pct, fromLeft} = Q.split;
+  html(`<div class="q">3. わりあい</div><div class="hint">線の <b>${fromLeft ? "左" : "右"}端から <span style="font-size:22px;color:var(--accent)">${pct}%</span></b> の位置をタップ</div>
+  <div class="stage" id="st" style="aspect-ratio:2/1"></div><button id="ok" disabled>決定</button>`);
+  const st = document.getElementById("st"); const {g,w,h} = canvasIn(st);
+  const x0 = w*.08, x1 = w*.92, y = h*.55; let px = null;
+  function draw(showAns){
+    g.clearRect(0,0,w,h);
+    g.strokeStyle = "#2b2621"; g.lineWidth = 4; g.beginPath(); g.moveTo(x0,y); g.lineTo(x1,y); g.stroke();
+    [x0,x1].forEach(x => { g.beginPath(); g.moveTo(x,y-14); g.lineTo(x,y+14); g.stroke(); });
+    g.fillStyle = "#8a8075"; g.font = "bold 14px sans-serif"; g.textAlign = "center"; g.fillText(fromLeft ? "ここから" : "", x0+18, y+40); g.fillText(fromLeft ? "" : "ここから", x1-18, y+40);
+    if (px !== null){ g.strokeStyle = "#e2572b"; g.lineWidth = 4; g.beginPath(); g.moveTo(px,y-26); g.lineTo(px,y+26); g.stroke(); }
+    if (showAns){ const ax = fromLeft ? x0+(x1-x0)*pct/100 : x1-(x1-x0)*pct/100; g.strokeStyle = "#2f9e6b"; g.setLineDash([6,5]); g.beginPath(); g.moveTo(ax,y-34); g.lineTo(ax,y+34); g.stroke(); g.setLineDash([]); }
+  }
+  st.onpointerdown = e => { const b = st.getBoundingClientRect(); px = Math.min(x1, Math.max(x0, e.clientX-b.left)); draw(); document.getElementById("ok").disabled = false; };
+  draw();
+  document.getElementById("ok").onclick = () => {
+    let got = (px - x0) / (x1 - x0) * 100; if (!fromLeft) got = 100 - got;
+    const d = Math.abs(got - pct); const s = Math.max(0, Math.round(100 - d * 4)); scores.split = {s, line:`${got.toFixed(1)}%（正解 ${pct}%）`};
+    st.onpointerdown = null; draw(true); document.getElementById("ok").remove();
+    main.insertAdjacentHTML("beforeend", `<div class="res">あなた ${got.toFixed(1)}% ／ 正解 ${pct}%（緑の点線）</div><div class="score">${s} 点</div><button id="nx">結果を見る</button>`);
+    document.getElementById("nx").onclick = result;
+  };
+}
+
+// ---- 結果 ----
+function result(){
+  steps.forEach(s => s.className = "done");
+  const keys = ["count","angle","split"], names = {count:"かず",angle:"かくど",split:"わりあい"};
+  const total = Math.round(keys.reduce((t,k)=>t+scores[k].s,0)/3);
+  const rank = total>=95?"神の目":total>=85?"職人の目":total>=70?"いい目":total>=50?"ふつうの目":"節穴";
+  const sq = s => s>=90?"🟩":s>=70?"🟨":s>=40?"🟧":"🟥";
+  const shareText = `目分量 ${PRACTICE?"練習":`${today.getMonth()+1}/${today.getDate()}`}  ${total}点\n${keys.map(k=>sq(scores[k].s)).join("")}  ${rank}\n${location.origin}${location.pathname}`;
+  // 三角形のグラフ
+  const S = 260, c = S/2, r = 82, ang = k => -Math.PI/2 + k*2*Math.PI/3;
+  const pt = (k,v) => `${c + Math.cos(ang(k))*r*v},${c + Math.sin(ang(k))*r*v}`;
+  const grid = [1,.66,.33].map(v=>`<polygon points="${[0,1,2].map(k=>pt(k,v)).join(" ")}" fill="none" stroke="#e4dccd"/>`).join("");
+  const poly = `<polygon points="${keys.map((k,i)=>pt(i,Math.max(.04,scores[k].s/100))).join(" ")}" fill="rgba(226,87,43,.25)" stroke="#e2572b" stroke-width="3"/>`;
+  const labels = keys.map((k,i)=>{ const [x,y] = pt(i,1.22).split(","); return `<text x="${x}" y="${+y+5}" text-anchor="middle" font-size="14" font-weight="700" fill="#2b2621">${names[k]}</text>`; }).join("");
+  html(`<div class="res">きょうの目分量</div><div class="big">${total}<span style="font-size:24px">点</span></div><div class="q">${rank}</div>
+  <svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">${grid}${poly}${labels}</svg>
+  <div class="rows">${keys.map(k=>`<div><span>${names[k]}　${scores[k].line}</span><b>${scores[k].s}</b></div>`).join("")}</div>
+  <div class="share" id="sh"></div>
+  <button id="cp">結果をコピー</button><button class="ghost" id="pr">練習でもう一回</button>`);
+  document.getElementById("sh").textContent = shareText;
+  document.getElementById("cp").onclick = async () => { try { await navigator.clipboard.writeText(shareText); toast("コピーしました"); } catch(e) { toast("コピーできませんでした"); } };
+  document.getElementById("pr").onclick = () => location.href = location.pathname + "?practice";
+  if (!PRACTICE) try { localStorage.setItem("mebunryo-"+ymd, JSON.stringify({total, scores})); } catch(e) {}
+}
+intro();
+</script>
+</body></html>
